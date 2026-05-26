@@ -3,7 +3,7 @@ import {
   FolderOpen, RefreshCw, Users, Plus, Mail, Settings, 
   Clock, Zap, CheckCircle, X, Paperclip, GripVertical, User,
   LayoutDashboard, List, AlertTriangle, CalendarClock, AlertOctagon, RotateCcw, Search,
-  Download, Filter, AlignLeft
+  Download, Filter, AlignLeft, ArrowUp, ArrowDown
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
@@ -193,12 +193,12 @@ export default function App() {
     }
   };
 
-  // Contadores (excluyendo archivados para el Kanban)
+  // Contadores (excluyendo archivados solo para las columnas del Kanban, no para el total de terminados)
   const activeProjects = projects.filter(p => !p.archived);
   const counts = {
     inicio: activeProjects.filter(p => p.status === 'inicio').length,
     desarrollo: activeProjects.filter(p => p.status === 'desarrollo').length,
-    terminado: activeProjects.filter(p => p.status === 'terminado').length,
+    terminado: projects.filter(p => p.status === 'terminado').length, // Ahora cuenta TODOS los terminados (incluso los que no están en el Kanban)
   };
 
   if (!user) {
@@ -308,7 +308,7 @@ export default function App() {
                 icon={<CheckCircle size={18} />} 
                 color="bg-green-500" 
                 status="terminado" 
-                count={counts.terminado}
+                count={activeProjects.filter(p => p.status === 'terminado').length} // Aquí solo muestra los visibles en el tablero
                 projects={activeProjects.filter(p => p.status === 'terminado')}
                 onUpdateStatus={handleUpdateProjectStatus}
                 onEdit={(p) => { setEditingProject(p); setIsNewProjectModalOpen(true); }}
@@ -918,11 +918,12 @@ function TeamModal({ onClose, team, db }) {
   );
 }
 
-// --- VISTA DE LISTA GENERAL AMPLIADA CON BUSCADOR Y EXPORTAR ---
+// --- VISTA DE LISTA GENERAL AMPLIADA CON BUSCADOR, ORDENAMIENTO Y EXPORTAR ---
 function ProjectListView({ projects, team, onEdit, onRestore }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('Todos');
   const [sellerFilter, setSellerFilter] = useState('Todos');
+  const [sortConfig, setSortConfig] = useState({ key: 'number', direction: 'desc' });
 
   const formatDate = (timestamp) => {
     if (!timestamp) return '-';
@@ -938,6 +939,15 @@ function ProjectListView({ projects, team, onEdit, onRestore }) {
       case 'terminado': return <span className="px-3 py-1 bg-green-500 text-white rounded-full text-xs font-bold uppercase shadow-sm">Terminado</span>;
       default: return null;
     }
+  };
+
+  // Solicitar un nuevo orden (al hacer clic en la cabecera)
+  const requestSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
   };
 
   // Obtener lista única de vendedores para el filtro
@@ -971,11 +981,31 @@ function ProjectListView({ projects, team, onEdit, onRestore }) {
            assigneesNames.includes(s);
   });
 
+  // Aplicar el ordenamiento sobre los proyectos ya filtrados
+  const sortedProjects = [...filteredProjects].sort((a, b) => {
+    if (sortConfig.key === 'number') {
+      const aNum = a.number || '';
+      const bNum = b.number || '';
+      // El localeCompare numérico soluciona el orden de "26-50" frente a "26-253"
+      const result = aNum.localeCompare(bNum, undefined, { numeric: true, sensitivity: 'base' });
+      return sortConfig.direction === 'asc' ? result : -result;
+    } 
+    else if (sortConfig.key === 'createdAt') {
+      const aTime = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+      const bTime = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+      if (aTime < bTime) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aTime > bTime) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    }
+    return 0;
+  });
+
   const exportToCSV = () => {
     const headers = ['Nº Proyecto', 'Fecha Creacion', 'Titulo', 'Vendedor', 'Estado', 'Fecha Promesa', 'Notas'];
     const csvRows = [headers.join(',')];
     
-    filteredProjects.forEach(p => {
+    // Usamos sortedProjects en lugar de filteredProjects para que se exporte como lo están viendo
+    sortedProjects.forEach(p => {
       const dateCreated = p.createdAt ? formatDate(p.createdAt) : '';
       const title = `"${(p.title || '').replace(/"/g, '""')}"`;
       const seller = `"${(p.seller || '').replace(/"/g, '""')}"`;
@@ -1049,8 +1079,34 @@ function ProjectListView({ projects, team, onEdit, onRestore }) {
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-white border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500">
-              <th className="p-4 font-bold">Nº Proyecto</th>
-              <th className="p-4 font-bold">Fecha Creación</th>
+              <th 
+                className="p-4 font-bold cursor-pointer hover:bg-slate-100 transition-colors select-none group"
+                onClick={() => requestSort('number')}
+                title="Hacer clic para ordenar por Número"
+              >
+                <div className="flex items-center gap-1">
+                  Nº Proyecto
+                  {sortConfig.key === 'number' ? (
+                    sortConfig.direction === 'asc' ? <ArrowUp size={14} className="text-cyan-600" /> : <ArrowDown size={14} className="text-cyan-600" />
+                  ) : (
+                    <ArrowDown size={14} className="text-slate-300 opacity-0 group-hover:opacity-100" />
+                  )}
+                </div>
+              </th>
+              <th 
+                className="p-4 font-bold cursor-pointer hover:bg-slate-100 transition-colors select-none group"
+                onClick={() => requestSort('createdAt')}
+                title="Hacer clic para ordenar por Fecha"
+              >
+                <div className="flex items-center gap-1">
+                  Fecha Creación
+                  {sortConfig.key === 'createdAt' ? (
+                    sortConfig.direction === 'asc' ? <ArrowUp size={14} className="text-cyan-600" /> : <ArrowDown size={14} className="text-cyan-600" />
+                  ) : (
+                    <ArrowDown size={14} className="text-slate-300 opacity-0 group-hover:opacity-100" />
+                  )}
+                </div>
+              </th>
               <th className="p-4 font-bold">Descripción</th>
               <th className="p-4 font-bold">Vendedor</th>
               <th className="p-4 font-bold">Responsable(s)</th>
@@ -1060,14 +1116,14 @@ function ProjectListView({ projects, team, onEdit, onRestore }) {
             </tr>
           </thead>
           <tbody className="text-sm">
-            {filteredProjects.length === 0 ? (
+            {sortedProjects.length === 0 ? (
               <tr>
                 <td colSpan="8" className="p-8 text-center text-slate-400 font-medium">
                   No se encontraron proyectos para tu búsqueda o filtro.
                 </td>
               </tr>
             ) : (
-              filteredProjects.map(project => {
+              sortedProjects.map(project => {
                 const assignedTeam = team.filter(t => (project.assignees || []).includes(t.id));
                 return (
                   <tr 
