@@ -555,6 +555,20 @@ function ProjectCard({ project, onEdit, team }) {
             </div>
           )}
         </div>
+        
+        {/* Botón de Enlace a Carpeta */}
+        {project.folderPath && (
+          <a 
+            href={project.folderPath} 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            onClick={(e) => e.stopPropagation()} 
+            className="flex items-center gap-1.5 text-[10px] font-bold text-blue-600 bg-blue-50 px-2.5 py-1.5 rounded-md border border-blue-200 hover:bg-blue-100 hover:border-blue-300 transition-colors"
+            title="Abrir carpeta en SharePoint/Teams"
+          >
+            <FolderOpen size={12} /> Abrir
+          </a>
+        )}
       </div>
     </div>
   );
@@ -719,12 +733,12 @@ function NewProjectModal({ onClose, onSave, onDelete, team, initialFile, editing
               </div>
             </div>
 
-            {/* Folder Path */}
+            {/* Folder Path (Modificado para Enlaces de Teams) */}
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1 flex items-center gap-1">
-                <FolderOpen size={14} /> Ruta de Carpeta Local (Opcional)
+                <FolderOpen size={14} /> Enlace de Carpeta (SharePoint / Teams)
               </label>
-              <input type="text" name="folderPath" value={formData.folderPath || ''} onChange={handleChange} placeholder="Ej: C:\Proyectos\Ingenieria\" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600 font-mono focus:ring-2 focus:ring-cyan-500 outline-none bg-slate-50" />
+              <input type="text" name="folderPath" value={formData.folderPath || ''} onChange={handleChange} placeholder="Ej: https://tuempresa.sharepoint.com/..." className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-blue-600 font-medium focus:ring-2 focus:ring-cyan-500 outline-none bg-slate-50" />
             </div>
 
             {/* Notas / Último Avance */}
@@ -1089,16 +1103,32 @@ function ProjectListView({ projects, team, onEdit, onRestore }) {
                     </td>
 
                     <td className="p-4 text-right">
-                      {project.archived ? (
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); onRestore(project.id); }}
-                          className="flex items-center gap-1.5 ml-auto text-xs font-bold text-cyan-600 bg-cyan-100 px-3 py-1.5 rounded-lg hover:bg-cyan-200 transition-colors"
-                        >
-                          <RotateCcw size={14} /> Restaurar
-                        </button>
-                      ) : (
-                        <span className="text-xs text-slate-400 whitespace-nowrap">Activo en Tablero</span>
-                      )}
+                      <div className="flex items-center justify-end gap-2">
+                        {/* Botón rápido para abrir carpeta en el Listado */}
+                        {project.folderPath && (
+                          <a 
+                            href={project.folderPath} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center justify-center p-1.5 text-blue-600 bg-blue-50 rounded-md border border-blue-200 hover:bg-blue-100 transition-colors"
+                            title="Abrir carpeta de Teams/SharePoint"
+                          >
+                            <FolderOpen size={14} />
+                          </a>
+                        )}
+
+                        {project.archived ? (
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); onRestore(project.id); }}
+                            className="flex items-center gap-1.5 text-xs font-bold text-cyan-600 bg-cyan-100 px-3 py-1.5 rounded-lg hover:bg-cyan-200 transition-colors whitespace-nowrap"
+                          >
+                            <RotateCcw size={14} /> Restaurar
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-400 whitespace-nowrap">Activo en Tablero</span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 )
