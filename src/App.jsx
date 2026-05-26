@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   FolderOpen, RefreshCw, Users, Plus, Mail, FileText, Settings, 
   Clock, Zap, CheckCircle, X, Paperclip, GripVertical, User,
-  LayoutDashboard, List, Archive, AlertTriangle
+  LayoutDashboard, List, Archive, AlertTriangle, CalendarClock, AlertOctagon, RotateCcw, Search
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
@@ -165,6 +165,21 @@ export default function App() {
     setProjectToArchive(null);
   };
 
+  const handleRestoreProject = async (projectId) => {
+    if (!user) return;
+    try {
+      const projRef = doc(db, 'projects', projectId);
+      // Lo restauramos y lo mandamos directamente a "desarrollo"
+      await updateDoc(projRef, { 
+        archived: false, 
+        status: 'desarrollo',
+        updatedAt: serverTimestamp() 
+      });
+    } catch (error) {
+      console.error("Error restaurando proyecto:", error);
+    }
+  };
+
   // --- DRAG AND DROP GENERAL ---
   const onMainDrop = (e) => {
     e.preventDefault();
@@ -301,7 +316,12 @@ export default function App() {
             </div>
           </>
         ) : (
-          <ProjectListView projects={projects} team={team} onEdit={(p) => { setEditingProject(p); setIsNewProjectModalOpen(true); }} />
+          <ProjectListView 
+            projects={projects} 
+            team={team} 
+            onEdit={(p) => { setEditingProject(p); setIsNewProjectModalOpen(true); }}
+            onRestore={handleRestoreProject}
+          />
         )}
       </main>
 
@@ -437,18 +457,35 @@ function ProjectCard({ project, onEdit, team }) {
   const assignees = project.assignees || [];
   const assignedTeam = team.filter(t => assignees.includes(t.id));
 
+  // Lógica de advertencia de Fecha Promesa
+  let isWarning = false;
+  let daysLeft = null;
+  if (project.promisedDate && project.status !== 'terminado' && !project.archived) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    // Para evitar zonas horarias, agregamos T00:00:00
+    const promise = new Date(project.promisedDate + 'T00:00:00'); 
+    const diffTime = promise - today;
+    daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    // Alarma si es para hoy, ya pasó o faltan 2 días o menos
+    if (daysLeft <= 2) {
+      isWarning = true;
+    }
+  }
+
   return (
     <div 
       draggable
       onDragStart={handleDragStart}
       onClick={() => onEdit(project)}
-      className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 cursor-pointer hover:shadow-md hover:border-cyan-300 transition-all group relative"
+      className={`bg-white p-4 rounded-xl shadow-sm border ${isWarning ? 'border-red-400 shadow-red-100' : 'border-slate-200'} cursor-pointer hover:shadow-md hover:border-cyan-300 transition-all group relative`}
     >
       <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 text-slate-300 cursor-grab">
         <GripVertical size={16} />
       </div>
       
-      <div className="flex items-center gap-2 mb-2">
+      <div className="flex flex-wrap items-center gap-2 mb-2">
         <span className="text-xs font-bold text-slate-400 uppercase">#{project.number}</span>
         {project.priority && (
           <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${getPriorityColor(project.priority)} uppercase tracking-wider`}>
@@ -460,16 +497,31 @@ function ProjectCard({ project, onEdit, team }) {
             Archivado
           </span>
         )}
-        {project.source === 'Correo' && <Mail size={12} className="text-slate-400" />}
+        
+        {/* Etiqueta de Alerta */}
+        {isWarning && (
+          <div className="flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-200 uppercase tracking-wider animate-pulse">
+            <AlertOctagon size={12} />
+            {daysLeft < 0 ? 'Vencido' : daysLeft === 0 ? 'Hoy' : `Faltan ${daysLeft}d`}
+          </div>
+        )}
       </div>
       
       <h3 className="font-semibold text-slate-800 mb-1 leading-tight line-clamp-2">{project.title}</h3>
       
-      {project.seller && (
-        <p className="text-xs text-slate-500 mb-3 font-medium flex items-center gap-1">
-          <User size={12} className="text-slate-400"/> {project.seller}
-        </p>
-      )}
+      <div className="flex flex-col gap-1 mb-3">
+        {project.seller && (
+          <p className="text-xs text-slate-500 font-medium flex items-center gap-1.5">
+            <User size={12} className="text-slate-400"/> {project.seller}
+          </p>
+        )}
+        {project.promisedDate && (
+          <p className={`text-xs font-medium flex items-center gap-1.5 ${isWarning ? 'text-red-500' : 'text-slate-500'}`}>
+            <CalendarClock size={12} className={isWarning ? 'text-red-400' : 'text-slate-400'}/> 
+            Promesa: {new Date(project.promisedDate + 'T00:00:00').toLocaleDateString()}
+          </p>
+        )}
+      </div>
 
       <div className="flex items-center justify-between mt-4">
         <div className="flex -space-x-2">
@@ -488,6 +540,12 @@ function ProjectCard({ project, onEdit, team }) {
             </div>
           )}
         </div>
+        
+        {project.attachments?.length > 0 && (
+          <div className="flex items-center gap-1 text-slate-400 text-xs font-medium">
+            <Paperclip size={12} /> {project.attachments.length}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -501,6 +559,7 @@ function NewProjectModal({ onClose, onSave, onDelete, team, initialFile, editing
     seller: '',
     sender: '',
     priority: 'Media',
+    promisedDate: '',
     folderPath: '',
     assignees: [],
     status: 'inicio'
@@ -514,14 +573,10 @@ function NewProjectModal({ onClose, onSave, onDelete, team, initialFile, editing
         assignees: editingProject.assignees || []
       });
     } else if (initialFile) {
-      // Auto-fill base on file
       const name = initialFile.name;
       const isMail = name.endsWith('.msg') || name.endsWith('.eml');
       setSourceType(isMail ? 'Correo' : 'Manual');
-      setFormData(prev => ({
-        ...prev,
-        title: name
-      }));
+      setFormData(prev => ({ ...prev, title: name }));
     }
   }, [initialFile, editingProject]);
 
@@ -549,7 +604,7 @@ function NewProjectModal({ onClose, onSave, onDelete, team, initialFile, editing
       return;
     }
     if (!formData.title.trim()) {
-      alert("El título de la descripción es obligatorio");
+      alert("El título / descripción es obligatorio");
       return;
     }
     onSave({ ...formData, source: sourceType });
@@ -624,24 +679,33 @@ function NewProjectModal({ onClose, onSave, onDelete, team, initialFile, editing
               <input type="text" name="title" value={formData.title || ''} onChange={handleChange} required placeholder="Ej: RV_ Carro bomba Albin + VLT" className="w-full border border-slate-300 rounded-lg px-4 py-3 text-slate-800 font-medium focus:ring-2 focus:ring-cyan-500 outline-none shadow-sm" />
             </div>
 
-            {/* Priority */}
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Prioridad</label>
-              <div className="flex gap-2">
-                {['Alta', 'Media', 'Baja'].map(prio => (
-                  <button
-                    key={prio}
-                    type="button"
-                    onClick={() => setFormData(prev => ({ ...prev, priority: prio }))}
-                    className={`px-4 py-1.5 rounded-full text-sm font-medium border transition-colors ${
-                      formData.priority === prio 
-                        ? (prio === 'Alta' ? 'bg-red-500 text-white border-red-500' : prio === 'Media' ? 'bg-orange-500 text-white border-orange-500' : 'bg-green-500 text-white border-green-500')
-                        : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    {prio}
-                  </button>
-                ))}
+            {/* Promise Date & Priority */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+                  <CalendarClock size={14} /> Fecha Promesa
+                </label>
+                <input type="date" name="promisedDate" value={formData.promisedDate || ''} onChange={handleChange} className="w-full border border-slate-300 rounded-lg px-4 py-2.5 text-slate-800 font-medium focus:ring-2 focus:ring-cyan-500 outline-none shadow-sm" />
+              </div>
+              
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Prioridad</label>
+                <div className="flex gap-2">
+                  {['Alta', 'Media', 'Baja'].map(prio => (
+                    <button
+                      key={prio}
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, priority: prio }))}
+                      className={`px-4 py-2.5 rounded-lg text-sm font-medium border transition-colors ${
+                        formData.priority === prio 
+                          ? (prio === 'Alta' ? 'bg-red-500 text-white border-red-500' : prio === 'Media' ? 'bg-orange-500 text-white border-orange-500' : 'bg-green-500 text-white border-green-500')
+                          : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      {prio}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -822,8 +886,10 @@ function TeamModal({ onClose, team, db }) {
   );
 }
 
-// --- NUEVO COMPONENTE: VISTA DE LISTA GENERAL ---
-function ProjectListView({ projects, team, onEdit }) {
+// --- VISTA DE LISTA GENERAL AMPLIADA CON BUSCADOR ---
+function ProjectListView({ projects, team, onEdit, onRestore }) {
+  const [searchTerm, setSearchTerm] = useState('');
+
   const formatDate = (timestamp) => {
     if (!timestamp) return '-';
     const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -834,46 +900,121 @@ function ProjectListView({ projects, team, onEdit }) {
     if (archived) return <span className="px-3 py-1 bg-slate-200 text-slate-600 rounded-full text-xs font-bold uppercase">Archivado</span>;
     switch(status) {
       case 'inicio': return <span className="px-3 py-1 bg-slate-400 text-white rounded-full text-xs font-bold uppercase">Inicio</span>;
-      case 'desarrollo': return <span className="px-3 py-1 bg-yellow-400 text-white rounded-full text-xs font-bold uppercase">En Desarrollo</span>;
+      case 'desarrollo': return <span className="px-3 py-1 bg-yellow-400 text-white rounded-full text-xs font-bold uppercase">Desarrollo</span>;
       case 'terminado': return <span className="px-3 py-1 bg-green-500 text-white rounded-full text-xs font-bold uppercase">Terminado</span>;
       default: return null;
     }
   };
 
+  // Filtrado de proyectos según la búsqueda
+  const filteredProjects = projects.filter(p => {
+    if (!searchTerm) return true;
+    const s = searchTerm.toLowerCase();
+    
+    // Obtener nombres de los asignados
+    const assigneesNames = team
+      .filter(t => (p.assignees || []).includes(t.id))
+      .map(t => t.name.toLowerCase())
+      .join(' ');
+
+    return (p.number || '').toLowerCase().includes(s) ||
+           (p.title || '').toLowerCase().includes(s) ||
+           (p.seller || '').toLowerCase().includes(s) ||
+           assigneesNames.includes(s);
+  });
+
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+      
+      {/* Buscador */}
+      <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+        <h2 className="font-bold text-slate-700 flex items-center gap-2">
+          <List size={18} /> Todos los Proyectos
+        </h2>
+        <div className="relative w-full max-w-md">
+          <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
+          <input 
+            type="text" 
+            placeholder="Buscar por número, título, vendedor o responsable..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all"
+          />
+        </div>
+      </div>
+
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500">
+            <tr className="bg-white border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500">
               <th className="p-4 font-bold">Nº Proyecto</th>
               <th className="p-4 font-bold">Fecha Creación</th>
               <th className="p-4 font-bold">Descripción</th>
-              <th className="p-4 font-bold">Vendedor / Solicitante</th>
+              <th className="p-4 font-bold">Vendedor</th>
+              <th className="p-4 font-bold">Responsable(s)</th>
               <th className="p-4 font-bold">Estado</th>
-              <th className="p-4 font-bold">Fecha Término</th>
+              <th className="p-4 font-bold">Fecha Promesa</th>
+              <th className="p-4 font-bold text-right">Acción</th>
             </tr>
           </thead>
           <tbody className="text-sm">
-            {projects.length === 0 ? (
+            {filteredProjects.length === 0 ? (
               <tr>
-                <td colSpan="6" className="p-8 text-center text-slate-400">No hay proyectos registrados</td>
+                <td colSpan="8" className="p-8 text-center text-slate-400 font-medium">
+                  No se encontraron proyectos para tu búsqueda.
+                </td>
               </tr>
             ) : (
-              projects.map(project => (
-                <tr 
-                  key={project.id} 
-                  onClick={() => onEdit(project)}
-                  className="border-b border-slate-100 hover:bg-cyan-50 cursor-pointer transition-colors"
-                >
-                  <td className="p-4 font-bold text-slate-700 whitespace-nowrap">#{project.number}</td>
-                  <td className="p-4 text-slate-500 whitespace-nowrap">{formatDate(project.createdAt)}</td>
-                  <td className="p-4 text-slate-800 font-medium max-w-md truncate" title={project.title}>{project.title}</td>
-                  <td className="p-4 text-slate-600 font-medium">{project.seller || '-'}</td>
-                  <td className="p-4 whitespace-nowrap">{getStatusBadge(project.status, project.archived)}</td>
-                  <td className="p-4 text-slate-500 whitespace-nowrap">{formatDate(project.completedAt)}</td>
-                </tr>
-              ))
+              filteredProjects.map(project => {
+                const assignedTeam = team.filter(t => (project.assignees || []).includes(t.id));
+                return (
+                  <tr 
+                    key={project.id} 
+                    onClick={() => onEdit(project)}
+                    className="border-b border-slate-100 hover:bg-cyan-50 cursor-pointer transition-colors"
+                  >
+                    <td className="p-4 font-bold text-cyan-700 whitespace-nowrap">#{project.number}</td>
+                    <td className="p-4 text-slate-500 whitespace-nowrap text-xs">{formatDate(project.createdAt)}</td>
+                    <td className="p-4 text-slate-800 font-medium max-w-xs truncate" title={project.title}>{project.title}</td>
+                    <td className="p-4 text-slate-600 font-medium">{project.seller || '-'}</td>
+                    
+                    <td className="p-4">
+                      <div className="flex -space-x-1">
+                        {assignedTeam.length > 0 ? assignedTeam.map((member, i) => (
+                          <div 
+                            key={member.id} title={member.name}
+                            className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white border-2 border-white shadow-sm"
+                            style={{ backgroundColor: member.color, zIndex: 10 - i }}
+                          >
+                            {member.initials}
+                          </div>
+                        )) : (
+                          <span className="text-xs text-slate-400">Sin asignar</span>
+                        )}
+                      </div>
+                    </td>
+
+                    <td className="p-4 whitespace-nowrap">{getStatusBadge(project.status, project.archived)}</td>
+                    
+                    <td className="p-4 text-slate-500 whitespace-nowrap text-xs">
+                      {project.promisedDate ? new Date(project.promisedDate + 'T00:00:00').toLocaleDateString() : '-'}
+                    </td>
+
+                    <td className="p-4 text-right">
+                      {project.archived ? (
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); onRestore(project.id); }}
+                          className="flex items-center gap-1.5 ml-auto text-xs font-bold text-cyan-600 bg-cyan-100 px-3 py-1.5 rounded-lg hover:bg-cyan-200 transition-colors"
+                        >
+                          <RotateCcw size={14} /> Restaurar
+                        </button>
+                      ) : (
+                        <span className="text-xs text-slate-400">Activo</span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })
             )}
           </tbody>
         </table>
