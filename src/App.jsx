@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  FolderOpen, RefreshCw, Users, Plus, Mail, FileText, Settings, 
+  FolderOpen, RefreshCw, Users, Plus, Mail, Settings, 
   Clock, Zap, CheckCircle, X, Paperclip, GripVertical, User,
-  LayoutDashboard, List, Archive, AlertTriangle, CalendarClock, AlertOctagon, RotateCcw, Search
+  LayoutDashboard, List, AlertTriangle, CalendarClock, AlertOctagon, RotateCcw, Search,
+  Download, Filter, AlignLeft
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
@@ -73,7 +74,7 @@ export default function App() {
     const projectsRef = collection(db, 'projects');
     const unsubscribeProjects = onSnapshot(projectsRef, (snapshot) => {
       const projData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setProjects(projData.sort((a, b) => b.number - a.number));
+      setProjects(projData.sort((a, b) => (b.number || 0) - (a.number || 0)));
     }, (error) => console.error("Error cargando proyectos:", error));
 
     // Suscribirse al Equipo
@@ -333,13 +334,13 @@ export default function App() {
               <CheckCircle size={30} />
             </div>
             <h3 className="text-xl font-bold text-slate-800 mb-2">¡Proyecto Terminado!</h3>
-            <p className="text-sm text-slate-600 mb-6">¿Deseas archivar este proyecto y sacarlo de la bandeja de seguimiento principal? Seguirá estando disponible en el Listado general.</p>
+            <p className="text-sm text-slate-600 mb-6">¿Deseas retirar este proyecto del tablero principal? Seguirá estando disponible en el Listado general.</p>
             <div className="flex gap-3 justify-center">
               <button onClick={() => handleArchiveProject(false)} className="px-5 py-2.5 rounded-lg border border-slate-200 text-slate-600 font-medium hover:bg-slate-50 transition-colors">
-                No, mantener en bandeja
+                No, mantener en tablero
               </button>
               <button onClick={() => handleArchiveProject(true)} className="px-5 py-2.5 rounded-lg bg-green-500 text-white font-medium hover:bg-green-600 shadow-md shadow-green-500/20 transition-colors">
-                Sí, sacar de la bandeja
+                Sí, retirar del tablero
               </button>
             </div>
           </div>
@@ -474,12 +475,14 @@ function ProjectCard({ project, onEdit, team }) {
     }
   }
 
+  const isUnassigned = assignedTeam.length === 0 && project.status !== 'terminado';
+
   return (
     <div 
       draggable
       onDragStart={handleDragStart}
       onClick={() => onEdit(project)}
-      className={`bg-white p-4 rounded-xl shadow-sm border ${isWarning ? 'border-red-400 shadow-red-100' : 'border-slate-200'} cursor-pointer hover:shadow-md hover:border-cyan-300 transition-all group relative`}
+      className={`bg-white p-4 rounded-xl shadow-sm border ${isWarning ? 'border-red-400 shadow-red-100' : isUnassigned ? 'border-amber-400 shadow-amber-100' : 'border-slate-200'} cursor-pointer hover:shadow-md hover:border-cyan-300 transition-all group relative`}
     >
       <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 text-slate-300 cursor-grab">
         <GripVertical size={16} />
@@ -493,8 +496,8 @@ function ProjectCard({ project, onEdit, team }) {
           </span>
         )}
         {project.archived && (
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded border bg-slate-100 text-slate-500 border-slate-200 uppercase tracking-wider">
-            Archivado
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded border bg-green-50 text-green-600 border-green-200 uppercase tracking-wider">
+            Terminado
           </span>
         )}
         
@@ -503,6 +506,13 @@ function ProjectCard({ project, onEdit, team }) {
           <div className="flex items-center gap-1 text-[10px] font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-200 uppercase tracking-wider animate-pulse">
             <AlertOctagon size={12} />
             {daysLeft < 0 ? 'Vencido' : daysLeft === 0 ? 'Hoy' : `Faltan ${daysLeft}d`}
+          </div>
+        )}
+
+        {/* Etiqueta Sin Asignar */}
+        {isUnassigned && !isWarning && (
+          <div className="flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 uppercase tracking-wider">
+            Sin Asignar
           </div>
         )}
       </div>
@@ -519,6 +529,11 @@ function ProjectCard({ project, onEdit, team }) {
           <p className={`text-xs font-medium flex items-center gap-1.5 ${isWarning ? 'text-red-500' : 'text-slate-500'}`}>
             <CalendarClock size={12} className={isWarning ? 'text-red-400' : 'text-slate-400'}/> 
             Promesa: {new Date(project.promisedDate + 'T00:00:00').toLocaleDateString()}
+          </p>
+        )}
+        {project.notes && (
+          <p className="text-xs text-slate-500 font-medium flex items-center gap-1.5 mt-1 border-t pt-1.5 border-slate-100 line-clamp-1">
+            <AlignLeft size={12} className="text-slate-400"/> {project.notes}
           </p>
         )}
       </div>
@@ -540,12 +555,6 @@ function ProjectCard({ project, onEdit, team }) {
             </div>
           )}
         </div>
-        
-        {project.attachments?.length > 0 && (
-          <div className="flex items-center gap-1 text-slate-400 text-xs font-medium">
-            <Paperclip size={12} /> {project.attachments.length}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -561,6 +570,7 @@ function NewProjectModal({ onClose, onSave, onDelete, team, initialFile, editing
     priority: 'Media',
     promisedDate: '',
     folderPath: '',
+    notes: '',
     assignees: [],
     status: 'inicio'
   });
@@ -715,6 +725,14 @@ function NewProjectModal({ onClose, onSave, onDelete, team, initialFile, editing
                 <FolderOpen size={14} /> Ruta de Carpeta Local (Opcional)
               </label>
               <input type="text" name="folderPath" value={formData.folderPath || ''} onChange={handleChange} placeholder="Ej: C:\Proyectos\Ingenieria\" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600 font-mono focus:ring-2 focus:ring-cyan-500 outline-none bg-slate-50" />
+            </div>
+
+            {/* Notas / Último Avance */}
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1 flex items-center gap-1">
+                <AlignLeft size={14} /> Notas de seguimiento / Último Avance
+              </label>
+              <textarea name="notes" value={formData.notes || ''} onChange={handleChange} rows="2" placeholder="Ej: A la espera de planos del cliente..." className="w-full border border-slate-300 rounded-lg px-4 py-3 text-sm text-slate-800 focus:ring-2 focus:ring-cyan-500 outline-none shadow-sm resize-none"></textarea>
             </div>
 
             {/* Assignees */}
@@ -886,9 +904,11 @@ function TeamModal({ onClose, team, db }) {
   );
 }
 
-// --- VISTA DE LISTA GENERAL AMPLIADA CON BUSCADOR ---
+// --- VISTA DE LISTA GENERAL AMPLIADA CON BUSCADOR Y EXPORTAR ---
 function ProjectListView({ projects, team, onEdit, onRestore }) {
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('Todos');
+  const [sellerFilter, setSellerFilter] = useState('Todos');
 
   const formatDate = (timestamp) => {
     if (!timestamp) return '-';
@@ -897,17 +917,31 @@ function ProjectListView({ projects, team, onEdit, onRestore }) {
   };
 
   const getStatusBadge = (status, archived) => {
-    if (archived) return <span className="px-3 py-1 bg-slate-200 text-slate-600 rounded-full text-xs font-bold uppercase">Archivado</span>;
+    if (archived) return <span className="px-3 py-1 bg-green-500 text-white rounded-full text-xs font-bold uppercase shadow-sm">Terminado</span>;
     switch(status) {
-      case 'inicio': return <span className="px-3 py-1 bg-slate-400 text-white rounded-full text-xs font-bold uppercase">Inicio</span>;
-      case 'desarrollo': return <span className="px-3 py-1 bg-yellow-400 text-white rounded-full text-xs font-bold uppercase">Desarrollo</span>;
-      case 'terminado': return <span className="px-3 py-1 bg-green-500 text-white rounded-full text-xs font-bold uppercase">Terminado</span>;
+      case 'inicio': return <span className="px-3 py-1 bg-slate-400 text-white rounded-full text-xs font-bold uppercase shadow-sm">Inicio</span>;
+      case 'desarrollo': return <span className="px-3 py-1 bg-yellow-400 text-white rounded-full text-xs font-bold uppercase shadow-sm">Desarrollo</span>;
+      case 'terminado': return <span className="px-3 py-1 bg-green-500 text-white rounded-full text-xs font-bold uppercase shadow-sm">Terminado</span>;
       default: return null;
     }
   };
 
-  // Filtrado de proyectos según la búsqueda
+  // Obtener lista única de vendedores para el filtro
+  const uniqueSellers = [...new Set(projects.map(p => p.seller).filter(Boolean))].sort();
+
+  // Filtrado de proyectos según la búsqueda y filtros
   const filteredProjects = projects.filter(p => {
+    // Filtro por Estado
+    if (statusFilter !== 'Todos') {
+      if (statusFilter === 'Terminado' && p.status !== 'terminado') return false;
+      if (statusFilter === 'Desarrollo' && p.status !== 'desarrollo') return false;
+      if (statusFilter === 'Inicio' && p.status !== 'inicio') return false;
+    }
+
+    // Filtro por Vendedor
+    if (sellerFilter !== 'Todos' && p.seller !== sellerFilter) return false;
+
+    // Búsqueda de texto
     if (!searchTerm) return true;
     const s = searchTerm.toLowerCase();
     
@@ -923,23 +957,77 @@ function ProjectListView({ projects, team, onEdit, onRestore }) {
            assigneesNames.includes(s);
   });
 
+  const exportToCSV = () => {
+    const headers = ['Nº Proyecto', 'Fecha Creacion', 'Titulo', 'Vendedor', 'Estado', 'Fecha Promesa', 'Notas'];
+    const csvRows = [headers.join(',')];
+    
+    filteredProjects.forEach(p => {
+      const dateCreated = p.createdAt ? formatDate(p.createdAt) : '';
+      const title = `"${(p.title || '').replace(/"/g, '""')}"`;
+      const seller = `"${(p.seller || '').replace(/"/g, '""')}"`;
+      const status = p.status;
+      const promise = p.promisedDate ? new Date(p.promisedDate + 'T00:00:00').toLocaleDateString('es-AR') : '';
+      const notes = `"${(p.notes || '').replace(/"/g, '""')}"`;
+      
+      csvRows.push([p.number, dateCreated, title, seller, status, promise, notes].join(','));
+    });
+    
+    const csvContent = csvRows.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `proyectos_export_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+  };
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
       
-      {/* Buscador */}
-      <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-        <h2 className="font-bold text-slate-700 flex items-center gap-2">
+      {/* Buscador y Filtros */}
+      <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <h2 className="font-bold text-slate-700 flex items-center gap-2 whitespace-nowrap">
           <List size={18} /> Todos los Proyectos
         </h2>
-        <div className="relative w-full max-w-md">
-          <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
-          <input 
-            type="text" 
-            placeholder="Buscar por número, título, vendedor o responsable..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all"
-          />
+        
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+          <div className="flex items-center gap-2 bg-white border border-slate-300 rounded-lg px-3 py-1.5 shadow-sm">
+            <Filter size={16} className="text-slate-400" />
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="bg-transparent text-sm outline-none text-slate-600 font-medium cursor-pointer">
+              <option value="Todos">Todos los Estados</option>
+              <option value="Inicio">Inicio</option>
+              <option value="Desarrollo">En Desarrollo</option>
+              <option value="Terminado">Terminados</option>
+            </select>
+          </div>
+
+          {uniqueSellers.length > 0 && (
+            <div className="flex items-center gap-2 bg-white border border-slate-300 rounded-lg px-3 py-1.5 shadow-sm">
+              <User size={16} className="text-slate-400" />
+              <select value={sellerFilter} onChange={(e) => setSellerFilter(e.target.value)} className="bg-transparent text-sm outline-none text-slate-600 font-medium max-w-[150px] cursor-pointer">
+                <option value="Todos">Todos los Vendedores</option>
+                {uniqueSellers.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          )}
+
+          <div className="relative w-full md:w-64">
+            <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
+            <input 
+              type="text" 
+              placeholder="Buscar..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 transition-all shadow-sm"
+            />
+          </div>
+
+          <button 
+            onClick={exportToCSV}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm ml-auto"
+          >
+            <Download size={16} /> Exportar CSV
+          </button>
         </div>
       </div>
 
@@ -961,7 +1049,7 @@ function ProjectListView({ projects, team, onEdit, onRestore }) {
             {filteredProjects.length === 0 ? (
               <tr>
                 <td colSpan="8" className="p-8 text-center text-slate-400 font-medium">
-                  No se encontraron proyectos para tu búsqueda.
+                  No se encontraron proyectos para tu búsqueda o filtro.
                 </td>
               </tr>
             ) : (
@@ -1009,7 +1097,7 @@ function ProjectListView({ projects, team, onEdit, onRestore }) {
                           <RotateCcw size={14} /> Restaurar
                         </button>
                       ) : (
-                        <span className="text-xs text-slate-400">Activo</span>
+                        <span className="text-xs text-slate-400 whitespace-nowrap">Activo en Tablero</span>
                       )}
                     </td>
                   </tr>
