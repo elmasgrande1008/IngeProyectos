@@ -127,6 +127,7 @@ export default function App() {
       const projRef = doc(db, 'projects', projectId);
       const updateData = { status: newStatus, updatedAt: serverTimestamp() };
       
+      // Guarda la fecha exacta cuando se pasa a terminado
       if (newStatus === 'terminado') {
         updateData.completedAt = serverTimestamp();
       }
@@ -1001,7 +1002,7 @@ function ProjectListView({ projects, team, onEdit, onRestore }) {
   });
 
   const exportToCSV = () => {
-    const headers = ['Nº Proyecto', 'Fecha Creacion', 'Titulo', 'Vendedor', 'Estado', 'Fecha Promesa', 'Notas'];
+    const headers = ['Nº Proyecto', 'Fecha Creacion', 'Titulo', 'Vendedor', 'Estado', 'Fecha Promesa', 'Fecha Terminado', 'Notas'];
     const csvRows = [headers.join(',')];
     
     // Usamos sortedProjects en lugar de filteredProjects para que se exporte como lo están viendo
@@ -1011,9 +1012,13 @@ function ProjectListView({ projects, team, onEdit, onRestore }) {
       const seller = `"${(p.seller || '').replace(/"/g, '""')}"`;
       const status = p.status;
       const promise = p.promisedDate ? new Date(p.promisedDate + 'T00:00:00').toLocaleDateString('es-AR') : '';
+      
+      // Formatear la fecha de término si existe
+      const dateCompleted = p.completedAt ? formatDate(p.completedAt) : '';
+      
       const notes = `"${(p.notes || '').replace(/"/g, '""')}"`;
       
-      csvRows.push([p.number, dateCreated, title, seller, status, promise, notes].join(','));
+      csvRows.push([p.number, dateCreated, title, seller, status, promise, dateCompleted, notes].join(','));
     });
     
     const csvContent = csvRows.join('\n');
@@ -1112,13 +1117,14 @@ function ProjectListView({ projects, team, onEdit, onRestore }) {
               <th className="p-4 font-bold">Responsable(s)</th>
               <th className="p-4 font-bold">Estado</th>
               <th className="p-4 font-bold">Fecha Promesa</th>
+              <th className="p-4 font-bold">Fecha Término</th>
               <th className="p-4 font-bold text-right">Acción</th>
             </tr>
           </thead>
           <tbody className="text-sm">
             {sortedProjects.length === 0 ? (
               <tr>
-                <td colSpan="8" className="p-8 text-center text-slate-400 font-medium">
+                <td colSpan="9" className="p-8 text-center text-slate-400 font-medium">
                   No se encontraron proyectos para tu búsqueda o filtro.
                 </td>
               </tr>
@@ -1156,6 +1162,10 @@ function ProjectListView({ projects, team, onEdit, onRestore }) {
                     
                     <td className="p-4 text-slate-500 whitespace-nowrap text-xs">
                       {project.promisedDate ? new Date(project.promisedDate + 'T00:00:00').toLocaleDateString() : '-'}
+                    </td>
+
+                    <td className="p-4 text-slate-500 whitespace-nowrap text-xs font-medium">
+                      {(project.status === 'terminado' || project.archived) && project.completedAt ? formatDate(project.completedAt) : '-'}
                     </td>
 
                     <td className="p-4 text-right">
