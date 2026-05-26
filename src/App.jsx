@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
   FolderOpen, RefreshCw, Users, Plus, Mail, FileText, Settings, 
-  Clock, Zap, CheckCircle, X, Paperclip, GripVertical, User
+  Clock, Zap, CheckCircle, X, Paperclip, GripVertical, User,
+  LayoutDashboard, List, Archive, AlertTriangle
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
@@ -40,6 +41,11 @@ export default function App() {
   // Modals state
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
   const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
+  
+  // Views and Archive state
+  const [view, setView] = useState('board'); // 'board' | 'list'
+  const [projectToArchive, setProjectToArchive] = useState(null);
+  const [projectToDelete, setProjectToDelete] = useState(null);
   
   // New Project Form State
   const [droppedFile, setDroppedFile] = useState(null);
@@ -91,11 +97,6 @@ export default function App() {
   }, [user]);
 
   // --- FUNCIONES DE BASE DE DATOS ---
-  const getNextProjectNumber = () => {
-    if (projects.length === 0) return 1;
-    return Math.max(...projects.map(p => p.number)) + 1;
-  };
-
   const handleSaveProject = async (projectData) => {
     if (!user) return;
     const isNew = !projectData.id;
@@ -104,9 +105,8 @@ export default function App() {
     const finalData = {
       ...projectData,
       id: docId,
-      number: isNew ? getNextProjectNumber() : projectData.number,
       updatedAt: serverTimestamp(),
-      ...(isNew && { createdAt: serverTimestamp() })
+      ...(isNew && { createdAt: serverTimestamp(), archived: false })
     };
 
     try {
@@ -124,7 +124,20 @@ export default function App() {
     if (!user) return;
     try {
       const projRef = doc(db, 'projects', projectId);
-      await updateDoc(projRef, { status: newStatus, updatedAt: serverTimestamp() });
+      const updateData = { status: newStatus, updatedAt: serverTimestamp() };
+      
+      if (newStatus === 'terminado') {
+        updateData.completedAt = serverTimestamp();
+      }
+
+      await updateDoc(projRef, updateData);
+
+      if (newStatus === 'terminado') {
+        const proj = projects.find(p => p.id === projectId);
+        if (proj && !proj.archived) {
+          setProjectToArchive(projectId);
+        }
+      }
     } catch (error) {
       console.error("Error actualizando estado:", error);
     }
@@ -132,13 +145,24 @@ export default function App() {
 
   const handleDeleteProject = async (projectId) => {
     if (!user) return;
-    if (window.confirm("¿Estás seguro de eliminar este proyecto?")) {
-      try {
-        await deleteDoc(doc(db, 'projects', projectId));
-      } catch (error) {
-        console.error("Error eliminando:", error);
-      }
+    setProjectToDelete(projectId);
+  };
+
+  const confirmDelete = async () => {
+    if (!projectToDelete) return;
+    try {
+      await deleteDoc(doc(db, 'projects', projectToDelete));
+      setProjectToDelete(null);
+    } catch (error) {
+      console.error("Error eliminando:", error);
     }
+  };
+
+  const handleArchiveProject = async (archive) => {
+    if (archive && projectToArchive) {
+      await updateDoc(doc(db, 'projects', projectToArchive), { archived: true });
+    }
+    setProjectToArchive(null);
   };
 
   // --- DRAG AND DROP GENERAL ---
@@ -153,11 +177,12 @@ export default function App() {
     }
   };
 
-  // Contadores
+  // Contadores (excluyendo archivados para el Kanban)
+  const activeProjects = projects.filter(p => !p.archived);
   const counts = {
-    inicio: projects.filter(p => p.status === 'inicio').length,
-    desarrollo: projects.filter(p => p.status === 'desarrollo').length,
-    terminado: projects.filter(p => p.status === 'terminado').length,
+    inicio: activeProjects.filter(p => p.status === 'inicio').length,
+    desarrollo: activeProjects.filter(p => p.status === 'desarrollo').length,
+    terminado: activeProjects.filter(p => p.status === 'terminado').length,
   };
 
   if (!user) {
@@ -179,9 +204,18 @@ export default function App() {
         </div>
 
         <div className="flex flex-wrap items-center gap-4">
-          <div className="flex gap-2 text-sm font-medium">
+          <div className="flex gap-2 bg-slate-100 p-1 rounded-lg">
+            <button onClick={() => setView('board')} className={`px-3 py-1.5 rounded-md text-sm font-medium flex items-center gap-2 ${view === 'board' ? 'bg-white text-cyan-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              <LayoutDashboard size={16} /> Tablero
+            </button>
+            <button onClick={() => setView('list')} className={`px-3 py-1.5 rounded-md text-sm font-medium flex items-center gap-2 ${view === 'list' ? 'bg-white text-cyan-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              <List size={16} /> Listado
+            </button>
+          </div>
+
+          <div className="flex gap-2 text-sm font-medium hidden md:flex">
             <span className="bg-slate-100 text-slate-600 px-4 py-1.5 rounded-full flex gap-2 items-center">
-              <span className="font-bold">{projects.length}</span> proyectos
+              <span className="font-bold">{activeProjects.length}</span> activos
             </span>
             <span className="bg-yellow-50 text-yellow-600 px-4 py-1.5 rounded-full flex gap-2 items-center border border-yellow-100">
               <span className="font-bold">{counts.desarrollo}</span> en desarrollo
@@ -215,57 +249,103 @@ export default function App() {
 
       {/* MAIN CONTENT */}
       <main className="p-6 max-w-[1600px] mx-auto">
-        {/* Drop Zone Banner */}
-        <div className="mb-8 border-2 border-dashed border-slate-200 bg-white/50 rounded-xl p-6 text-center text-slate-400 flex flex-col items-center justify-center gap-2 hover:bg-cyan-50 hover:border-cyan-300 hover:text-cyan-600 transition-all cursor-pointer group">
-          <Mail className="opacity-50 group-hover:opacity-100 transition-opacity" size={24} />
-          <p className="font-medium">Arrastra correos (.eml/.msg) o archivos PDF aquí para crear un nuevo proyecto automáticamente</p>
-          <button 
-            onClick={() => { setDroppedFile(null); setEditingProject(null); setIsNewProjectModalOpen(true); }}
-            className="text-cyan-500 font-semibold mt-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
-          >
-            <Plus size={16} /> Crear manualmente
-          </button>
-        </div>
+        {view === 'board' ? (
+          <>
+            {/* Drop Zone Banner */}
+            <div className="mb-8 border-2 border-dashed border-slate-200 bg-white/50 rounded-xl p-6 text-center text-slate-400 flex flex-col items-center justify-center gap-2 hover:bg-cyan-50 hover:border-cyan-300 hover:text-cyan-600 transition-all cursor-pointer group">
+              <Mail className="opacity-50 group-hover:opacity-100 transition-opacity" size={24} />
+              <p className="font-medium">Arrastra correos (.eml/.msg) o archivos PDF aquí para crear un nuevo proyecto automáticamente</p>
+              <button 
+                onClick={() => { setDroppedFile(null); setEditingProject(null); setIsNewProjectModalOpen(true); }}
+                className="text-cyan-500 font-semibold mt-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <Plus size={16} /> Crear manualmente
+              </button>
+            </div>
 
-        {/* KANBAN BOARD */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <KanbanColumn 
-            title="Inicio" 
-            icon={<Clock size={18} />} 
-            color="bg-slate-400" 
-            status="inicio" 
-            count={counts.inicio}
-            projects={projects.filter(p => p.status === 'inicio')}
-            onUpdateStatus={handleUpdateProjectStatus}
-            onEdit={(p) => { setEditingProject(p); setIsNewProjectModalOpen(true); }}
-            team={team}
-          />
-          <KanbanColumn 
-            title="En Desarrollo" 
-            icon={<Zap size={18} />} 
-            color="bg-yellow-400" 
-            status="desarrollo" 
-            count={counts.desarrollo}
-            projects={projects.filter(p => p.status === 'desarrollo')}
-            onUpdateStatus={handleUpdateProjectStatus}
-            onEdit={(p) => { setEditingProject(p); setIsNewProjectModalOpen(true); }}
-            team={team}
-          />
-          <KanbanColumn 
-            title="Terminado" 
-            icon={<CheckCircle size={18} />} 
-            color="bg-green-500" 
-            status="terminado" 
-            count={counts.terminado}
-            projects={projects.filter(p => p.status === 'terminado')}
-            onUpdateStatus={handleUpdateProjectStatus}
-            onEdit={(p) => { setEditingProject(p); setIsNewProjectModalOpen(true); }}
-            team={team}
-          />
-        </div>
+            {/* KANBAN BOARD */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <KanbanColumn 
+                title="Inicio" 
+                icon={<Clock size={18} />} 
+                color="bg-slate-400" 
+                status="inicio" 
+                count={counts.inicio}
+                projects={activeProjects.filter(p => p.status === 'inicio')}
+                onUpdateStatus={handleUpdateProjectStatus}
+                onEdit={(p) => { setEditingProject(p); setIsNewProjectModalOpen(true); }}
+                team={team}
+              />
+              <KanbanColumn 
+                title="En Desarrollo" 
+                icon={<Zap size={18} />} 
+                color="bg-yellow-400" 
+                status="desarrollo" 
+                count={counts.desarrollo}
+                projects={activeProjects.filter(p => p.status === 'desarrollo')}
+                onUpdateStatus={handleUpdateProjectStatus}
+                onEdit={(p) => { setEditingProject(p); setIsNewProjectModalOpen(true); }}
+                team={team}
+              />
+              <KanbanColumn 
+                title="Terminado" 
+                icon={<CheckCircle size={18} />} 
+                color="bg-green-500" 
+                status="terminado" 
+                count={counts.terminado}
+                projects={activeProjects.filter(p => p.status === 'terminado')}
+                onUpdateStatus={handleUpdateProjectStatus}
+                onEdit={(p) => { setEditingProject(p); setIsNewProjectModalOpen(true); }}
+                team={team}
+              />
+            </div>
+          </>
+        ) : (
+          <ProjectListView projects={projects} team={team} onEdit={(p) => { setEditingProject(p); setIsNewProjectModalOpen(true); }} />
+        )}
       </main>
 
-      {/* MODALS */}
+      {/* MODALS Y ALERTAS */}
+      {projectToArchive && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 text-center">
+            <div className="mx-auto w-14 h-14 bg-green-100 text-green-600 rounded-full flex items-center justify-center mb-4">
+              <CheckCircle size={30} />
+            </div>
+            <h3 className="text-xl font-bold text-slate-800 mb-2">¡Proyecto Terminado!</h3>
+            <p className="text-sm text-slate-600 mb-6">¿Deseas archivar este proyecto y sacarlo de la bandeja de seguimiento principal? Seguirá estando disponible en el Listado general.</p>
+            <div className="flex gap-3 justify-center">
+              <button onClick={() => handleArchiveProject(false)} className="px-5 py-2.5 rounded-lg border border-slate-200 text-slate-600 font-medium hover:bg-slate-50 transition-colors">
+                No, mantener en bandeja
+              </button>
+              <button onClick={() => handleArchiveProject(true)} className="px-5 py-2.5 rounded-lg bg-green-500 text-white font-medium hover:bg-green-600 shadow-md shadow-green-500/20 transition-colors">
+                Sí, sacar de la bandeja
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {projectToDelete && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 text-center">
+            <div className="mx-auto w-14 h-14 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-4">
+              <AlertTriangle size={30} />
+            </div>
+            <h3 className="text-xl font-bold text-slate-800 mb-2">Eliminar Proyecto</h3>
+            <p className="text-sm text-slate-600 mb-6">¿Estás seguro de que deseas eliminar permanentemente este proyecto? Esta acción no se puede deshacer.</p>
+            <div className="flex gap-3 justify-center">
+              <button onClick={() => setProjectToDelete(null)} className="px-5 py-2.5 rounded-lg border border-slate-200 text-slate-600 font-medium hover:bg-slate-50 transition-colors">
+                Cancelar
+              </button>
+              <button onClick={confirmDelete} className="px-5 py-2.5 rounded-lg bg-red-500 text-white font-medium hover:bg-red-600 shadow-md shadow-red-500/20 transition-colors">
+                Sí, eliminar definitivamente
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isNewProjectModalOpen && (
         <NewProjectModal 
           onClose={() => { setIsNewProjectModalOpen(false); setEditingProject(null); setDroppedFile(null); }} 
@@ -328,7 +408,7 @@ function KanbanColumn({ title, icon, color, status, count, projects, onUpdateSta
       <div className="flex-1 min-h-[200px] bg-slate-50/50 border border-slate-200 border-dashed rounded-xl p-3 flex flex-col gap-3">
         {projects.length === 0 ? (
           <div className="h-full flex items-center justify-center text-slate-400 text-sm font-medium">
-            Sin proyectos
+            Vacío
           </div>
         ) : (
           projects.map(project => (
@@ -375,14 +455,20 @@ function ProjectCard({ project, onEdit, team }) {
             {project.priority}
           </span>
         )}
+        {project.archived && (
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded border bg-slate-100 text-slate-500 border-slate-200 uppercase tracking-wider">
+            Archivado
+          </span>
+        )}
         {project.source === 'Correo' && <Mail size={12} className="text-slate-400" />}
-        {project.source === 'PDF / Tecnico' && <FileText size={12} className="text-slate-400" />}
       </div>
       
       <h3 className="font-semibold text-slate-800 mb-1 leading-tight line-clamp-2">{project.title}</h3>
       
-      {project.subject && (
-        <p className="text-xs text-slate-500 mb-3 line-clamp-1">{project.subject}</p>
+      {project.seller && (
+        <p className="text-xs text-slate-500 mb-3 font-medium flex items-center gap-1">
+          <User size={12} className="text-slate-400"/> {project.seller}
+        </p>
       )}
 
       <div className="flex items-center justify-between mt-4">
@@ -402,12 +488,6 @@ function ProjectCard({ project, onEdit, team }) {
             </div>
           )}
         </div>
-        
-        {project.attachments?.length > 0 && (
-          <div className="flex items-center gap-1 text-slate-400 text-xs font-medium">
-            <Paperclip size={12} /> {project.attachments.length}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -416,16 +496,14 @@ function ProjectCard({ project, onEdit, team }) {
 function NewProjectModal({ onClose, onSave, onDelete, team, initialFile, editingProject }) {
   const [sourceType, setSourceType] = useState('Manual');
   const [formData, setFormData] = useState({
+    number: '',
     title: '',
+    seller: '',
     sender: '',
-    subject: '',
-    body: '',
     priority: 'Media',
     folderPath: '',
     assignees: [],
-    attachments: [],
-    status: 'inicio',
-    number: null
+    status: 'inicio'
   });
 
   useEffect(() => {
@@ -433,18 +511,16 @@ function NewProjectModal({ onClose, onSave, onDelete, team, initialFile, editing
       setSourceType(editingProject.source || 'Manual');
       setFormData({
         ...editingProject,
-        assignees: editingProject.assignees || [],
-        attachments: editingProject.attachments || []
+        assignees: editingProject.assignees || []
       });
     } else if (initialFile) {
       // Auto-fill base on file
       const name = initialFile.name;
       const isMail = name.endsWith('.msg') || name.endsWith('.eml');
-      setSourceType(isMail ? 'Correo' : 'PDF / Tecnico');
+      setSourceType(isMail ? 'Correo' : 'Manual');
       setFormData(prev => ({
         ...prev,
-        title: name,
-        attachments: [{ name, size: initialFile.size }]
+        title: name
       }));
     }
   }, [initialFile, editingProject]);
@@ -466,19 +542,14 @@ function NewProjectModal({ onClose, onSave, onDelete, team, initialFile, editing
     });
   };
 
-  const handleFileDrop = (e) => {
-    e.preventDefault();
-    const files = Array.from(e.dataTransfer.files);
-    setFormData(prev => ({
-      ...prev,
-      attachments: [...prev.attachments, ...files.map(f => ({ name: f.name, size: f.size }))]
-    }));
-  };
-
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (!formData.number.trim()) {
+      alert("El número de proyecto es obligatorio");
+      return;
+    }
     if (!formData.title.trim()) {
-      alert("El título es obligatorio");
+      alert("El título de la descripción es obligatorio");
       return;
     }
     onSave({ ...formData, source: sourceType });
@@ -506,7 +577,7 @@ function NewProjectModal({ onClose, onSave, onDelete, team, initialFile, editing
             <div>
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Tipo de Origen</label>
               <div className="flex gap-2">
-                {['Manual', 'Correo', 'PDF / Tecnico'].map(type => (
+                {['Manual', 'Correo'].map(type => (
                   <button
                     key={type}
                     type="button"
@@ -519,7 +590,6 @@ function NewProjectModal({ onClose, onSave, onDelete, team, initialFile, editing
                   >
                     {type === 'Manual' && <Settings size={16} />}
                     {type === 'Correo' && <Mail size={16} />}
-                    {type === 'PDF / Tecnico' && <FileText size={16} />}
                     {type}
                   </button>
                 ))}
@@ -531,23 +601,27 @@ function NewProjectModal({ onClose, onSave, onDelete, team, initialFile, editing
               <div className="bg-cyan-50/50 p-4 rounded-xl border border-cyan-100 space-y-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 mb-1">De (remitente)</label>
-                  <input type="text" name="sender" value={formData.sender} onChange={handleChange} placeholder="nombre@empresa.com" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1">Asunto</label>
-                  <input type="text" name="subject" value={formData.subject} onChange={handleChange} placeholder="Asunto del correo" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1">Cuerpo del correo (Opcional)</label>
-                  <textarea name="body" value={formData.body} onChange={handleChange} rows="3" placeholder="Pegue el texto aquí o será parseado automáticamente..." className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500 outline-none font-mono text-xs text-slate-600"></textarea>
+                  <input type="text" name="sender" value={formData.sender || ''} onChange={handleChange} placeholder="nombre@empresa.com" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500 outline-none" />
                 </div>
               </div>
             )}
 
+            {/* Project Number & Seller */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Número de Proyecto *</label>
+                <input type="text" name="number" value={formData.number || ''} onChange={handleChange} required placeholder="Ej: 26-253" className="w-full border border-slate-300 rounded-lg px-4 py-3 text-slate-800 font-medium focus:ring-2 focus:ring-cyan-500 outline-none shadow-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Vendedor / Solicitante</label>
+                <input type="text" name="seller" value={formData.seller || ''} onChange={handleChange} placeholder="Nombre del vendedor..." className="w-full border border-slate-300 rounded-lg px-4 py-3 text-slate-800 font-medium focus:ring-2 focus:ring-cyan-500 outline-none shadow-sm" />
+              </div>
+            </div>
+
             {/* Main Info */}
             <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Título del Proyecto *</label>
-              <input type="text" name="title" value={formData.title} onChange={handleChange} required placeholder="Ej: RV_ Carro bomba Albin + VLT" className="w-full border border-slate-300 rounded-lg px-4 py-3 text-slate-800 font-medium focus:ring-2 focus:ring-cyan-500 outline-none shadow-sm" />
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Título / Descripción del Proyecto *</label>
+              <input type="text" name="title" value={formData.title || ''} onChange={handleChange} required placeholder="Ej: RV_ Carro bomba Albin + VLT" className="w-full border border-slate-300 rounded-lg px-4 py-3 text-slate-800 font-medium focus:ring-2 focus:ring-cyan-500 outline-none shadow-sm" />
             </div>
 
             {/* Priority */}
@@ -576,8 +650,7 @@ function NewProjectModal({ onClose, onSave, onDelete, team, initialFile, editing
               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1 flex items-center gap-1">
                 <FolderOpen size={14} /> Ruta de Carpeta Local (Opcional)
               </label>
-              <input type="text" name="folderPath" value={formData.folderPath} onChange={handleChange} placeholder="Ej: C:\Proyectos\Ingenieria\ o /home/usuario/proyectos/" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600 font-mono focus:ring-2 focus:ring-cyan-500 outline-none bg-slate-50" />
-              <p className="text-[10px] text-slate-400 mt-1">* Ayuda a referenciar dónde están los archivos físicos de este proyecto.</p>
+              <input type="text" name="folderPath" value={formData.folderPath || ''} onChange={handleChange} placeholder="Ej: C:\Proyectos\Ingenieria\" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-600 font-mono focus:ring-2 focus:ring-cyan-500 outline-none bg-slate-50" />
             </div>
 
             {/* Assignees */}
@@ -603,36 +676,6 @@ function NewProjectModal({ onClose, onSave, onDelete, team, initialFile, editing
                   );
                 })}
               </div>
-            </div>
-
-            {/* Attachments Dropzone */}
-            <div>
-              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Archivos Adjuntos (Metadatos)</label>
-              <div 
-                className="border-2 border-dashed border-slate-300 rounded-xl p-4 text-center cursor-pointer hover:bg-slate-50 transition-colors"
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={handleFileDrop}
-              >
-                <div className="text-slate-400 flex flex-col items-center gap-1">
-                  <Paperclip size={20} />
-                  <span className="text-sm">Arrastrar o click para registrar archivos</span>
-                </div>
-              </div>
-              {formData.attachments.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  {formData.attachments.map((file, idx) => (
-                    <div key={idx} className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-lg border border-slate-100">
-                      <span className="text-sm text-slate-600 truncate flex-1">{file.name}</span>
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs text-slate-400">{(file.size / 1024).toFixed(1)} KB</span>
-                        <button type="button" onClick={() => setFormData(prev => ({...prev, attachments: prev.attachments.filter((_, i) => i !== idx)}))} className="text-slate-400 hover:text-red-500">
-                          <X size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
 
           </form>
@@ -774,6 +817,66 @@ function TeamModal({ onClose, team, db }) {
             </button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// --- NUEVO COMPONENTE: VISTA DE LISTA GENERAL ---
+function ProjectListView({ projects, team, onEdit }) {
+  const formatDate = (timestamp) => {
+    if (!timestamp) return '-';
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    return date.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  };
+
+  const getStatusBadge = (status, archived) => {
+    if (archived) return <span className="px-3 py-1 bg-slate-200 text-slate-600 rounded-full text-xs font-bold uppercase">Archivado</span>;
+    switch(status) {
+      case 'inicio': return <span className="px-3 py-1 bg-slate-400 text-white rounded-full text-xs font-bold uppercase">Inicio</span>;
+      case 'desarrollo': return <span className="px-3 py-1 bg-yellow-400 text-white rounded-full text-xs font-bold uppercase">En Desarrollo</span>;
+      case 'terminado': return <span className="px-3 py-1 bg-green-500 text-white rounded-full text-xs font-bold uppercase">Terminado</span>;
+      default: return null;
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500">
+              <th className="p-4 font-bold">Nº Proyecto</th>
+              <th className="p-4 font-bold">Fecha Creación</th>
+              <th className="p-4 font-bold">Descripción</th>
+              <th className="p-4 font-bold">Vendedor / Solicitante</th>
+              <th className="p-4 font-bold">Estado</th>
+              <th className="p-4 font-bold">Fecha Término</th>
+            </tr>
+          </thead>
+          <tbody className="text-sm">
+            {projects.length === 0 ? (
+              <tr>
+                <td colSpan="6" className="p-8 text-center text-slate-400">No hay proyectos registrados</td>
+              </tr>
+            ) : (
+              projects.map(project => (
+                <tr 
+                  key={project.id} 
+                  onClick={() => onEdit(project)}
+                  className="border-b border-slate-100 hover:bg-cyan-50 cursor-pointer transition-colors"
+                >
+                  <td className="p-4 font-bold text-slate-700 whitespace-nowrap">#{project.number}</td>
+                  <td className="p-4 text-slate-500 whitespace-nowrap">{formatDate(project.createdAt)}</td>
+                  <td className="p-4 text-slate-800 font-medium max-w-md truncate" title={project.title}>{project.title}</td>
+                  <td className="p-4 text-slate-600 font-medium">{project.seller || '-'}</td>
+                  <td className="p-4 whitespace-nowrap">{getStatusBadge(project.status, project.archived)}</td>
+                  <td className="p-4 text-slate-500 whitespace-nowrap">{formatDate(project.completedAt)}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );
