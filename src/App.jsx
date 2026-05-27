@@ -1002,31 +1002,66 @@ function ProjectListView({ projects, team, onEdit, onRestore }) {
   });
 
   const exportToCSV = () => {
-    const headers = ['Nº Proyecto', 'Fecha Creacion', 'Titulo', 'Vendedor', 'Estado', 'Fecha Promesa', 'Fecha Terminado', 'Notas'];
-    const csvRows = [headers.join(',')];
+    // Encabezados EXACTOS a los que pide la jefa de ventas
+    const headers = [
+      'CODIGO PROYECTO', 
+      'AA', 
+      'SUCURSAL', 
+      ' ', // Columna D vacía de su Excel
+      'DESCRIPCION', // Columna E de su Excel
+      'FECHA DE PROMESA', 
+      'RESPONSABLE', 
+      'COMENTARIOS DE INGENIERIA', 
+      'COMENTARIOS DEL VENDEDOR', 
+      'FECHA DE CUMPLIMIENTO'
+    ];
     
-    // Usamos sortedProjects en lugar de filteredProjects para que se exporte como lo están viendo
+    // Usamos PUNTO Y COMA para que el Excel en español lo separe en columnas automáticamente
+    const separator = ';';
+    const csvRows = [headers.join(separator)];
+    
     sortedProjects.forEach(p => {
-      const dateCreated = p.createdAt ? formatDate(p.createdAt) : '';
-      const title = `"${(p.title || '').replace(/"/g, '""')}"`;
-      const seller = `"${(p.seller || '').replace(/"/g, '""')}"`;
-      const status = p.status;
-      const promise = p.promisedDate ? new Date(p.promisedDate + 'T00:00:00').toLocaleDateString('es-AR') : '';
+      const codigo = p.number || '';
+      const vendedor = `"${(p.seller || '').replace(/"/g, '""')}"`;
+      const sucursal = ''; // Dejado en blanco a propósito
+      const colD = ''; // Dejado en blanco a propósito
+      const descripcion = `"${(p.title || '').replace(/"/g, '""')}"`;
+      const promesa = p.promisedDate ? new Date(p.promisedDate + 'T00:00:00').toLocaleDateString('es-AR') : '';
       
-      // Formatear la fecha de término si existe
-      const dateCompleted = p.completedAt ? formatDate(p.completedAt) : '';
+      // Obtener iniciales de los responsables
+      const responsables = team
+        .filter(t => (p.assignees || []).includes(t.id))
+        .map(t => t.initials)
+        .join('-'); // Ej: LM-AR
       
-      const notes = `"${(p.notes || '').replace(/"/g, '""')}"`;
+      const comentariosIng = `"${(p.notes || '').replace(/"/g, '""')}"`;
+      const comentariosVend = ''; // Dejado en blanco a propósito
+      const fechaCumplimiento = p.completedAt ? formatDate(p.completedAt) : '';
       
-      csvRows.push([p.number, dateCreated, title, seller, status, promise, dateCompleted, notes].join(','));
+      csvRows.push([
+        codigo, 
+        vendedor, 
+        sucursal, 
+        colD, 
+        descripcion, 
+        promesa, 
+        responsables, 
+        comentariosIng, 
+        comentariosVend, 
+        fechaCumplimiento
+      ].join(separator));
     });
     
     const csvContent = csvRows.join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    
+    // El "BOM" (Byte Order Mark) le dice a Excel que el archivo es UTF-8, arreglando los acentos
+    const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+    const blob = new Blob([bom, csvContent], { type: 'text/csv;charset=utf-8;' });
+    
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `proyectos_export_${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = `Reporte_Ingenieria_${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
   };
 
