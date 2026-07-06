@@ -74,7 +74,13 @@ export default function App() {
     const projectsRef = collection(db, 'projects');
     const unsubscribeProjects = onSnapshot(projectsRef, (snapshot) => {
       const projData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setProjects(projData.sort((a, b) => (b.number || 0) - (a.number || 0)));
+      
+      // ORDENAMIENTO ALFANUMÉRICO CORREGIDO (Ordena de mayor a menor)
+      setProjects(projData.sort((a, b) => {
+        const aNum = String(a.number || '');
+        const bNum = String(b.number || '');
+        return bNum.localeCompare(aNum, undefined, { numeric: true, sensitivity: 'base' });
+      }));
     }, (error) => console.error("Error cargando proyectos:", error));
 
     // Suscribirse al Equipo
@@ -1002,9 +1008,10 @@ function ProjectListView({ projects, team, onEdit, onRestore }) {
   });
 
   const exportToCSV = () => {
-    // Encabezados EXACTOS a los que pide la jefa de ventas
+    // Encabezados EXACTOS a los que pide la jefa de ventas + Fecha de Creación
     const headers = [
       'CODIGO PROYECTO', 
+      'FECHA DE CREACION', // <-- NUEVA COLUMNA AGREGADA
       'AA', 
       'SUCURSAL', 
       ' ', // Columna D vacía de su Excel
@@ -1022,6 +1029,10 @@ function ProjectListView({ projects, team, onEdit, onRestore }) {
     
     sortedProjects.forEach(p => {
       const codigo = p.number || '';
+      
+      // Calculamos la fecha de creación para el reporte
+      const fechaCreacion = p.createdAt ? formatDate(p.createdAt) : '';
+
       const vendedor = `"${(p.seller || '').replace(/"/g, '""')}"`;
       const sucursal = ''; // Dejado en blanco a propósito
       const colD = ''; // Dejado en blanco a propósito
@@ -1040,6 +1051,7 @@ function ProjectListView({ projects, team, onEdit, onRestore }) {
       
       csvRows.push([
         codigo, 
+        fechaCreacion, // <-- INCLUIDO EN LA EXPORTACIÓN
         vendedor, 
         sucursal, 
         colD, 
